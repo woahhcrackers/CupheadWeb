@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>Unity WebGL Player | Cuphead Runtime</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      background: #1F1F20;
+    }
+
+    #unity-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw !important;
+      height: 100vh !important;
+      display: none;
+    }
+
+    /* simple white progress bar */
+    #loader {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 60%;
+      height: 10px;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    #loader div {
+      height: 100%;
+      width: 0%;
+      background: white;
+      transition: width 0.05s linear;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="loader"><div id="bar"></div></div>
+  <canvas id="unity-canvas"></canvas>
+
+  <script src="Build/Cuphead Runtime.loader.js"></script>
+
+  <script>
+    // --- UPDATE THIS TO MATCH THE NUMBER OF PARTS YOU GENERATED ---
+    const totalParts = 62;  // change this to your highest .pX number
+    // -------------------------------------------------------------
+
+    // load all *.data.pX files and merge them
+    async function mergeParts() {
+      let parts = [];
+
+      for (let i = 1; i <= totalParts; i++) {
+        const url = `Build/Cuphead Runtime.data.p${i}`;
+        const res = await fetch(url);
+        if (!res.ok) break;      // stop once parts end
+        parts.push(await res.arrayBuffer());
+      }
+
+      // merge byte arrays together
+      let totalLen = parts.reduce((t, p) => t + p.byteLength, 0);
+      let merged = new Uint8Array(totalLen);
+
+      let offset = 0;
+      for (let p of parts) {
+        merged.set(new Uint8Array(p), offset);
+        offset += p.byteLength;
+      }
+
+      return merged.buffer;
+    }
+
+    const progressBar = document.getElementById("bar");
+    const loader = document.getElementById("loader");
+    const unityCanvas = document.getElementById("unity-canvas");
+
+    (async () => {
+      const mergedData = await mergeParts();
+
+      // fake progress to avoid a frozen bar early on
+      let fakeProgress = 0;
+      const progressInterval = setInterval(() => {
+        if (fakeProgress < 90) {
+          fakeProgress += 1;
+          progressBar.style.width = fakeProgress + "%";
+        }
+      }, 20);
+
+      createUnityInstance(unityCanvas, {
+        dataUrl: "Build/Cuphead Runtime.data",  // overridden below
+        frameworkUrl: "Build/Cuphead Runtime.framework.js",
+        codeUrl: "Build/Cuphead Runtime.wasm",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "AstraaXD",
+        productName: "Cuphead Runtime",
+        productVersion: "1.0",
+        devicePixelRatio: 1,
+
+        // we load custom merged buffer instead of the real .data file
+        overrideDataUrl: async () => mergedData,
+
+        onProgress: (unity, progress) => {
+          progressBar.style.width = (progress * 100) + "%";
+        }
+      }).then(() => {
+        clearInterval(progressInterval);
+        progressBar.style.width = "100%";
+
+        // hide loader and show canvas after initialization
+        setTimeout(() => {
+          loader.style.display = "none";
+          unityCanvas.style.display = "block";
+        }, 300);
+      });
+    })();
+  </script>
+</body>
+</html>

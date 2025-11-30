@@ -1,129 +1,147 @@
 <!DOCTYPE html>
 <html lang="en-us">
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>Unity WebGL Player | Cuphead Runtime</title>
+<meta charset="utf-8">
+<title>Cuphead Runtime</title>
 
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      width: 100%;
-      height: 100%;
-      background: #1F1F20;
-    }
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #1F1F20;
+  }
 
-    #unity-canvas {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw !important;
-      height: 100vh !important;
-      display: none;
-    }
+  #unity-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    display: none;
+    background: transparent !important;
+  }
 
-    /* simple white progress bar */
-    #loader {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 60%;
-      height: 10px;
-      transform: translate(-50%, -50%);
-      background: rgba(255, 255, 255, 0.15);
-      border-radius: 5px;
-      overflow: hidden;
-    }
+  #loading-text {
+    position: absolute;
+    top: calc(50% - 28px);
+    left: 50%; transform: translateX(-50%);
+    font-family: "Comic Sans MS";
+    font-size: 22px; color: white;
+    user-select: none;
+  }
 
-    #loader div {
-      height: 100%;
-      width: 0%;
-      background: white;
-      transition: width 0.05s linear;
-    }
-  </style>
+  #loader {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 35%; height: 8px;
+    transform: translate(-50%, -50%);
+    background: rgba(255,255,255,0.15);
+    overflow: hidden;
+    border-radius: 0;
+  }
+
+  #loader div {
+    height: 100%; width: 0%;
+    background: white; border-radius: 0;
+    transition: width 0.15s linear;
+  }
+</style>
 </head>
 
 <body>
-  <div id="loader"><div id="bar"></div></div>
-  <canvas id="unity-canvas"></canvas>
 
-  <script src="Build/Cuphead Runtime.loader.js"></script>
+<div id="loading-text">loadling the runtime</div>
+<div id="loader"><div id="bar"></div></div>
+<canvas id="unity-canvas"></canvas>
 
-  <script>
-    // --- UPDATE THIS TO MATCH THE NUMBER OF PARTS YOU GENERATED ---
-    const totalParts = 62;  // change this to your highest .pX number
-    // -------------------------------------------------------------
+<script src="Build/Cuphead Runtime.loader.js"></script>
 
-    // load all *.data.pX files and merge them
-    async function mergeParts() {
-      let parts = [];
+<script>
+// was too lazy to make this myself so i stole the merging system from gn-math and told gpt to make the rest
+// i dont care
 
-      for (let i = 1; i <= totalParts; i++) {
-        const url = `Build/Cuphead Runtime.data.p${i}`;
-        const res = await fetch(url);
-        if (!res.ok) break;      // stop once parts end
-        parts.push(await res.arrayBuffer());
-      }
+const PART_COUNT = 62;
+const PART_BASE  = "Cuphead Runtime.data.p";
 
-      // merge byte arrays together
-      let totalLen = parts.reduce((t, p) => t + p.byteLength, 0);
-      let merged = new Uint8Array(totalLen);
+const bar    = document.getElementById("bar");
+const text   = document.getElementById("loading-text");
+const loader = document.getElementById("loader");
+const canvas = document.getElementById("unity-canvas");
 
-      let offset = 0;
-      for (let p of parts) {
-        merged.set(new Uint8Array(p), offset);
-        offset += p.byteLength;
-      }
+function smooth(current, target) {
+  return current + (target - current) * 0.1;
+}
 
-      return merged.buffer;
+function setBar(p) { bar.style.width = p + "%"; }
+
+async function loadParts() {
+  let buffers = [];
+  let downloaded = 0;
+  let total = PART_COUNT * 20 * 1024 * 1024;
+  let display = 0;
+
+  for (let i = 1; i <= PART_COUNT; i++) {
+    const res = await fetch(`Build/${PART_BASE}${i}`);
+    const reader = res.body.getReader();
+    let chunks = [], size = 0;
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+      downloaded += value.length;
+
+      let target = Math.min(90, (downloaded / total) * 90);
+      display = smooth(display, target);
+      setBar(display);
     }
 
-    const progressBar = document.getElementById("bar");
-    const loader = document.getElementById("loader");
-    const unityCanvas = document.getElementById("unity-canvas");
+    let buf = new Uint8Array(size), off = 0;
+    for (const c of chunks) { buf.set(c, off); off += c.length; }
+    buffers.push(buf.buffer);
+  }
+  return buffers;
+}
 
-    (async () => {
-      const mergedData = await mergeParts();
+function merge(buffers) {
+  let total = buffers.reduce((a,b)=>a+b.byteLength,0);
+  let out = new Uint8Array(total);
+  let off = 0;
+  for (const b of buffers) { out.set(new Uint8Array(b),off); off+=b.byteLength; }
+  return out.buffer;
+}
 
-      // fake progress to avoid a frozen bar early on
-      let fakeProgress = 0;
-      const progressInterval = setInterval(() => {
-        if (fakeProgress < 90) {
-          fakeProgress += 1;
-          progressBar.style.width = fakeProgress + "%";
-        }
-      }, 20);
+async function startUnity() {
+  const parts = await loadParts();
+  const merged = merge(parts);
 
-      createUnityInstance(unityCanvas, {
-        dataUrl: "Build/Cuphead Runtime.data",  // overridden below
-        frameworkUrl: "Build/Cuphead Runtime.framework.js",
-        codeUrl: "Build/Cuphead Runtime.wasm",
-        streamingAssetsUrl: "StreamingAssets",
-        companyName: "AstraaXD",
-        productName: "Cuphead Runtime",
-        productVersion: "1.0",
-        devicePixelRatio: 1,
+  const realFetch = window.fetch;
+  window.fetch = (url,...rest)=>{
+    if (typeof url==="string" && url.includes("Cuphead Runtime.data"))
+      return Promise.resolve(new Response(merged));
+    return realFetch(url,...rest);
+  };
 
-        // we load custom merged buffer instead of the real .data file
-        overrideDataUrl: async () => mergedData,
+  createUnityInstance(canvas, {
+    dataUrl: "Build/Cuphead Runtime.data",
+    frameworkUrl: "Build/Cuphead Runtime.framework.js",
+    codeUrl: "Build/Cuphead Runtime.wasm",
+    streamingAssetsUrl: "StreamingAssets",
+    companyName: "AstraaXD",
+    productName: "Cuphead Runtime",
+    productVersion: "1.0",
+    onProgress: (_u,p)=> setBar(90 + p*10)
+  }).then(()=>{
+    setBar(100);
+    setTimeout(()=>{
+      loader.style.display = "none";
+      text.style.display = "none";
+      canvas.style.display = "block";
+    },200);
+  });
+}
 
-        onProgress: (unity, progress) => {
-          progressBar.style.width = (progress * 100) + "%";
-        }
-      }).then(() => {
-        clearInterval(progressInterval);
-        progressBar.style.width = "100%";
-
-        // hide loader and show canvas after initialization
-        setTimeout(() => {
-          loader.style.display = "none";
-          unityCanvas.style.display = "block";
-        }, 300);
-      });
-    })();
-  </script>
+startUnity();
+</script>
 </body>
 </html>
